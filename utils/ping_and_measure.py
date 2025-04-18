@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python3
 import subprocess
 import re
@@ -145,3 +144,64 @@ def cleanup_ue_interfaces(container=UERANSIM_CONTAINER):
     cmd = ["docker", "exec", container, "bash", "-c", "for i in $(ip a | grep -o 'uesimtun[0-9]\\+'); do ip link delete $i; done"]
     subprocess.run(cmd)
     time.sleep(2)
+
+
+# ---- Authenticate UEs and perform ping measurements ----
+def auth_ping_measure(num_ues, packet_size, config_prefix, ping_count, interval, qos):
+   
+    # ---- Find UPF container ----
+    upf_id = get_container_id(UPF_IMAGE, is_image=True)
+    if not upf_id:
+        print("[ERROR] UPF container not found. Is Free5GC running?")
+        return False, []
+
+    # ---- Get UPF IP ----
+    upf_ip = get_container_ip(upf_id)
+    if not upf_ip:
+        print("[ERROR] Failed to get UPF IP address")
+        return False, []
+
+    print(f"[INFO] Found UPF (ID: {upf_id}) with IP: {upf_ip}")
+
+    # ---- Dictionary to store results ---- 
+    all_results = []
+    data_interfaces = []
+
+    # ---- Authenticate each UE ----
+    for i in range(1, num_ues + 1):
+        success, interfaces = authenticate_ue(
+            i,
+            config_prefix=config_prefix,
+            container=UERANSIM_CONTAINER
+        )
+
+        if success:
+            # Filter for data interfaces (odd-numbered)
+            for iface in interfaces:
+                iface_num = int(iface.replace('uesimtun', ''))
+                if iface_num % 2 == 1:  # Data plane interfaces are odd-numbered
+                    data_interfaces.append(iface)
+
+    #----  Wait for network stability ----
+    if data_interfaces:
+        print(f"\n[INFO] Found {len(data_interfaces)} data interfaces: {', '.join(data_interfaces)}")
+        print("[INFO] Waiting 3 seconds for network stability...")
+        time.sleep(3)
+
+        # Run ping tests from each interface
+        for interface in data_interfaces:
+            result = ping_from_interface(
+                interface,
+                upf_ip,
+                packet_size=packet_size,
+                count=ping_count,
+                interval=interval,
+                qos=qos,
+                container=UERANSIM_CONTAINER
+            )
+            all_results.append(result)
+
+        return True, all_results
+    else:
+        print("[ERROR] No data interfaces found. Authentication may have failed.")
+        return False, []
