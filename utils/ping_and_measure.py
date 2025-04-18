@@ -1,86 +1,147 @@
+
+#!/usr/bin/env python3
 import subprocess
 import re
 import os
 import sys
+import time
 from datetime import datetime
 
 # ---- Configuration ----
-UE_CONTAINER = "ueransim"
-UPF_IMAGE = "free5gc/upf:v4.0.0"
+UERANSIM_CONTAINER = "ueransim"
+UPF_IMAGE = "free5gc/upf:v3.4.2"    # may have different versions
 RESULTS_FILE = "ping_result.txt"
+CONFIG_PREFIX = "config/uecfg"
+DEFAULT_PACKET_SIZE = "8"
+DEFAULT_QOS = "0xb8"
+DEFAULT_INTERVAL = "0.02"
 
-# ---- Handle packet size argument ----
-if len(sys.argv) != 2:
-    print("Usage: python ping_and_measure.py <packet_size>")
-    sys.exit(1)
-
-packet_size = sys.argv[1]
-
-# ---- Inform the user the script started ----
-print(f"[INFO] Starting ping test with packet size = {packet_size} bytes...")
 
 # ---- Get UPF container ID ----
-def get_upf_container_id():
-    cmd = ["docker", "ps", "--filter", f"ancestor={UPF_IMAGE}", "--format", "{{.ID}}"]
+def get_container_id(container_name_or_image, is_image=False):
+    
+    if is_image:
+        cmd = ["docker", "ps", "--filter", f"ancestor={container_name_or_image}", "--format", "{{.ID}}"]
+    else:
+        cmd = ["docker", "ps", "--filter", f"name={container_name_or_image}", "--format", "{{.ID}}"]
+
     result = subprocess.run(cmd, stdout=subprocess.PIPE, text=True)
     container_id = result.stdout.strip()
     if not container_id:
-        raise Exception("UPF container not found")
+        print(f"[WARNING] Container with {'image' if is_image else 'name'} '{container_name_or_image}' not found")
+        return None
     return container_id
 
 # ---- Get UPF container IP address ----
 def get_container_ip(container_id):
+    
     cmd = ["docker", "exec", container_id, "hostname", "-I"]
     result = subprocess.run(cmd, stdout=subprocess.PIPE, text=True)
     ip_list = result.stdout.strip().split()
     return ip_list[0] if ip_list else None
 
-# ---- Get UE container IP address ----
-def get_ue_ip():
-    cmd = ["docker", "exec", UE_CONTAINER, "hostname", "-I"]
-    result = subprocess.run(cmd, stdout=subprocess.PIPE, text=True)
-    ip_list = result.stdout.strip().split()
-    return ip_list[0] if ip_list else None
+
+# ---- Authenticate a UE in the UERANSIM container ----
+def authenticate_ue(ue_index, config_prefix=CONFIG_PREFIX, container=UERANSIM_CONTAINER, timeout=30):
+    """
+        ue_index (int): Index number of the UE
+        config_prefix (str): Prefix for config files
+    """
+    config_file = f"{config_prefix}{ue_index}.yaml"
+    print(f"[INFO] Starting authentication for UE {ue_index} using {config_file}")
+
+    # Start UE in background
+    cmd = ["docker", "exec", "-d", container, "./nr-ue", "-c", config_file]
+    subprocess.run(cmd)
+
+    # Calculate expected interface numbers
+    base_interface_num = (ue_index - 1) * 2
+    expected_interfaces = [f"uesimtun{base_interface_num}", f"uesimtun{base_interface_num + 1}"]
+
+    print(f"[INFO] Waiting for interfaces {', '.join(expected_interfaces)} to be created...")
+
+    # Wait for interfaces to be created
+    start_time = time.time()
+    interfaces_found = []
+
+    while time.time() - start_time < timeout:
+        cmd = ["docker", "exec", container, "ip", "a"]
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, text=True)
+        output = result.stdout
+
+        interfaces_found = []
+        for interface in expected_interfaces:
+            if interface in output:
+                interfaces_found.append(interface)
+
+        if len(interfaces_found) == len(expected_interfaces):
+            print(f"[SUCCESS] UE {ue_index} authenticated successfully, interfaces created: {', '.join(interfaces_found)}")
+            return True, interfaces_found
+
+        time.sleep(1)
+
+    print(f"[ERROR] Timeout waiting for UE {ue_index} interfaces. Found: {', '.join(interfaces_found)}")
+    return False, interfaces_found
 
 # ---- Run ping from UE to UPF ----
-def run_ping(ue_container, destination_ip, packet_size):
-    cmd = [
-        "docker", "exec", ue_container,
-        "ping", "-c", "3", "-s", packet_size, destination_ip
-    ]
-    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    return result.stdout
+def ping_from_interface(interface, destination_ip, packet_size=DEFAULT_PACKET_SIZE,
+                        count=5, interval=DEFAULT_INTERVAL, qos=DEFAULT_QOS, container=UERANSIM_CONTAINER):
+    
+    print(f"[INFO] Pinging {destination_ip} from interface {interface} with packet size {packet_size}...")
 
-# ---- Parse ping output for average RTT and packet loss ----
-def parse_ping_output(output):
+    cmd = ["docker", "exec", container, "ping",
+           "-I", interface,
+           "-s", str(packet_size),
+           "-i", str(interval),
+           "-Q", str(qos),
+           "-c", str(count),
+           destination_ip]
+
+    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    output = result.stdout
+
+    # ---- Parse ping output for average RTT and packet loss ----
     rtt_match = re.search(r"rtt min/avg/max/mdev = [\d.]+/([\d.]+)/[\d.]+/[\d.]+ ms", output)
     loss_match = re.search(r"(\d+)% packet loss", output)
 
-    rtt = rtt_match.group(1) if rtt_match else "N/A"
-    loss = loss_match.group(1) if loss_match else "N/A"
-    return rtt, loss
+    results = {
+        'interface': interface,
+        'destination': destination_ip,
+        'packet_size': packet_size,
+        'qos': qos,
+        'rtt': rtt_match.group(1) if rtt_match else "N/A",
+        'loss': loss_match.group(1) if loss_match else "N/A",
+        'success': "0%" in output and rtt_match is not None,
+        'raw_output': output
+    }
 
-# ---- Main Execution ----
-try:
+    status = "✓" if results['success'] else "✗"
+    print(f"[{status}] Interface {interface}: RTT={results['rtt']}ms, Loss={results['loss']}%")
+
+    return results
+
+
+def save_results(results_list, packet_size):
+    """Save test results to file"""
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    upf_id = get_upf_container_id()
-    upf_ip = get_container_ip(upf_id)
-    ue_ip = get_ue_ip()
-
-    print(f"[INFO] UPF IP: {upf_ip}, UE IP: {ue_ip}")
-
-    ping_output = run_ping(UE_CONTAINER, upf_ip, packet_size)
-    rtt, loss = parse_ping_output(ping_output)
 
     with open(RESULTS_FILE, "a") as f:
         f.write(f"\n=== Ping Test at {timestamp} ===\n")
-        f.write(f"UE IP: {ue_ip}\n")
-        f.write(f"Destination (UPF) IP: {upf_ip}\n")
         f.write(f"Packet Size: {packet_size} bytes\n")
-        f.write(f"Average RTT: {rtt} ms\n")
-        f.write(f"Packet Loss: {loss} %\n")
 
-    print("[INFO] Ping test completed and saved to", RESULTS_FILE)
+        for result in results_list:
+            f.write(f"\nInterface: {result['interface']}\n")
+            f.write(f"Destination IP: {result['destination']}\n")
+            f.write(f"QoS: {result['qos']}\n")
+            f.write(f"Average RTT: {result['rtt']} ms\n")
+            f.write(f"Packet Loss: {result['loss']} %\n")
+            f.write(f"Success: {'Yes' if result['success'] else 'No'}\n")
 
-except Exception as e:
-    print("[ERROR]", str(e))
+    print(f"[INFO] Results saved to {RESULTS_FILE}")
+
+# ---- Clean up uesimtun interfaces in the container ----
+def cleanup_ue_interfaces(container=UERANSIM_CONTAINER):
+    print("[INFO] Cleaning up UE interfaces...")
+    cmd = ["docker", "exec", container, "bash", "-c", "for i in $(ip a | grep -o 'uesimtun[0-9]\\+'); do ip link delete $i; done"]
+    subprocess.run(cmd)
+    time.sleep(2)
