@@ -8,7 +8,7 @@ from datetime import datetime
 
 # ---- Configuration ----
 UERANSIM_CONTAINER = "ueransim"
-UPF_IMAGE = "free5gc/upf:v3.4.2"    # may have different versions
+UPF_CONTAINER = "psa-upf"    
 RESULTS_FILE = "ping_result.txt"
 CONFIG_PREFIX = "config/uecfg"
 DEFAULT_PACKET_SIZE = "8"
@@ -16,26 +16,11 @@ DEFAULT_QOS = "0xb8"
 DEFAULT_INTERVAL = "0.02"
 
 
-# ---- Get UPF container ID ----
-def get_container_id(container_name_or_image, is_image=False):
-    
-    if is_image:
-        cmd = ["docker", "ps", "--filter", f"ancestor={container_name_or_image}", "--format", "{{.ID}}"]
-    else:
-        cmd = ["docker", "ps", "--filter", f"name={container_name_or_image}", "--format", "{{.ID}}"]
-
-    result = subprocess.run(cmd, stdout=subprocess.PIPE, text=True)
-    container_id = result.stdout.strip()
-    if not container_id:
-        print(f"[WARNING] Container with {'image' if is_image else 'name'} '{container_name_or_image}' not found")
-        return None
-    return container_id
-
 # ---- Get UPF container IP address ----
-def get_container_ip(container_id):
-    
-    cmd = ["docker", "exec", container_id, "hostname", "-I"]
+def get_container_ip(container_name):
+    cmd = ["docker", "exec", container_name, "hostname", "-I"]
     result = subprocess.run(cmd, stdout=subprocess.PIPE, text=True)
+
     ip_list = result.stdout.strip().split()
     return ip_list[0] if ip_list else None
 
@@ -148,22 +133,14 @@ def cleanup_ue_interfaces(container=UERANSIM_CONTAINER):
 
 # ---- Authenticate UEs and perform ping measurements ----
 def auth_ping_measure(num_ues, packet_size, config_prefix, ping_count, interval, qos):
-   
-    # ---- Find UPF container ----
-    upf_id = get_container_id(UPF_IMAGE, is_image=True)
-    if not upf_id:
-        print("[ERROR] UPF container not found. Is Free5GC running?")
-        return False, []
-
-    # ---- Get UPF IP ----
-    upf_ip = get_container_ip(upf_id)
+    # ---- Get UPF IP using container name ----
+    upf_ip = get_container_ip(UPF_CONTAINER)
     if not upf_ip:
-        print("[ERROR] Failed to get UPF IP address")
+        print(f"[ERROR] Failed to get IP address for container '{UPF_CONTAINER}'")
         return False, []
 
-    print(f"[INFO] Found UPF (ID: {upf_id}) with IP: {upf_ip}")
+    print(f"[INFO] Found UPF container '{UPF_CONTAINER}' with IP: {upf_ip}")
 
-    # ---- Dictionary to store results ---- 
     all_results = []
     data_interfaces = []
 
@@ -176,19 +153,17 @@ def auth_ping_measure(num_ues, packet_size, config_prefix, ping_count, interval,
         )
 
         if success:
-            # Filter for data interfaces (odd-numbered)
             for iface in interfaces:
                 iface_num = int(iface.replace('uesimtun', ''))
-                if iface_num % 2 == 1:  # Data plane interfaces are odd-numbered
+                if iface_num % 2 == 1:  # Only data interfaces
                     data_interfaces.append(iface)
 
-    #----  Wait for network stability ----
+    # ---- Wait for network stability ----
     if data_interfaces:
         print(f"\n[INFO] Found {len(data_interfaces)} data interfaces: {', '.join(data_interfaces)}")
         print("[INFO] Waiting 3 seconds for network stability...")
         time.sleep(3)
 
-        # Run ping tests from each interface
         for interface in data_interfaces:
             result = ping_from_interface(
                 interface,
