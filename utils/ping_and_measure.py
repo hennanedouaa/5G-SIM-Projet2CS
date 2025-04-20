@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python3
 import subprocess
 import re
@@ -8,7 +9,7 @@ from datetime import datetime
 
 # ---- Configuration ----
 UERANSIM_CONTAINER = "ueransim"
-UPF_CONTAINER = "psa-upf"    
+UPF_CONTAINER = "psa-upf"
 RESULTS_FILE = "ping_result.txt"
 CONFIG_PREFIX = "config/uecfg"
 DEFAULT_PACKET_SIZE = "8"
@@ -38,12 +39,11 @@ def authenticate_ue(ue_index, config_prefix=CONFIG_PREFIX, container=UERANSIM_CO
     cmd = ["docker", "exec", "-d", container, "./nr-ue", "-c", config_file]
     subprocess.run(cmd)
 
-    # Calculate expected interface numbers
-    base_interface_num = (ue_index - 1) * 2
-    expected_interfaces = [f"uesimtun{base_interface_num}", f"uesimtun{base_interface_num + 1}"]
+    # Calculate expected interface numbers - modified for single interface per UE
+    expected_interface = f"uesimtun{ue_index - 1}"
+    expected_interfaces = [expected_interface]
 
-    print(f"[INFO] Waiting for interfaces {', '.join(expected_interfaces)} to be created...")
-
+    print(f"[INFO] Waiting for interface {expected_interface} to be created...")
     # Wait for interfaces to be created
     start_time = time.time()
     interfaces_found = []
@@ -70,7 +70,7 @@ def authenticate_ue(ue_index, config_prefix=CONFIG_PREFIX, container=UERANSIM_CO
 # ---- Run ping from UE to UPF ----
 def ping_from_interface(interface, destination_ip, packet_size=DEFAULT_PACKET_SIZE,
                         count=5, interval=DEFAULT_INTERVAL, qos=DEFAULT_QOS, container=UERANSIM_CONTAINER):
-    
+
     print(f"[INFO] Pinging {destination_ip} from interface {interface} with packet size {packet_size}...")
 
     cmd = ["docker", "exec", container, "ping",
@@ -146,17 +146,15 @@ def auth_ping_measure(num_ues, packet_size, config_prefix, ping_count, interval,
 
     # ---- Authenticate each UE ----
     for i in range(1, num_ues + 1):
-        success, interfaces = authenticate_ue(
-            i,
-            config_prefix=config_prefix,
-            container=UERANSIM_CONTAINER
-        )
+      success, interfaces = authenticate_ue(
+        i,
+        config_prefix=config_prefix,
+        container=UERANSIM_CONTAINER
+      )
 
-        if success:
-            for iface in interfaces:
-                iface_num = int(iface.replace('uesimtun', ''))
-                if iface_num % 2 == 1:  # Only data interfaces
-                    data_interfaces.append(iface)
+      if success:
+        # All interfaces are data interfaces in this case
+        data_interfaces.extend(interfaces)
 
     # ---- Wait for network stability ----
     if data_interfaces:
