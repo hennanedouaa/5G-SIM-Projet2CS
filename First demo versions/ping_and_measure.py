@@ -7,8 +7,6 @@ import sys
 import time
 from datetime import datetime
 
-# made by Amira Haddad Yahia Benyahia and Ikram Debih
-
 # ---- Configuration ----
 UERANSIM_CONTAINER = "ueransim"
 UPF_CONTAINER = "psa-upf"
