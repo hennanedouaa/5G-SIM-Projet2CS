@@ -1,5 +1,9 @@
 
 #!/usr/bin/env python3
+
+# made by Amira Haddad, Ikram Debbih , Yahia benyahia
+
+#Note: The ping result might show errors if the ping doesnt contain rtt informations
 import subprocess
 import re
 import os
