@@ -1,9 +1,5 @@
 
 #!/usr/bin/env python3
-
-# made by Amira Haddad, Ikram Debbih , Yahia benyahia
-
-#Note: The ping result might show errors if the ping doesnt contain rtt informations
 import subprocess
 import re
 import os
@@ -96,6 +92,7 @@ def ping_from_interface(interface, destination_ip, packet_size=DEFAULT_PACKET_SI
         'interface': interface,
         'destination': destination_ip,
         'packet_size': packet_size,
+        'qos': qos,
         'rtt': rtt_match.group(1) if rtt_match else "N/A",
         'loss': loss_match.group(1) if loss_match else "N/A",
         'success': "0%" in output and rtt_match is not None,
@@ -119,6 +116,7 @@ def save_results(results_list, packet_size):
         for result in results_list:
             f.write(f"\nInterface: {result['interface']}\n")
             f.write(f"Destination IP: {result['destination']}\n")
+            f.write(f"QoS: {result['qos']}\n")
             f.write(f"Average RTT: {result['rtt']} ms\n")
             f.write(f"Packet Loss: {result['loss']} %\n")
             f.write(f"Success: {'Yes' if result['success'] else 'No'}\n")

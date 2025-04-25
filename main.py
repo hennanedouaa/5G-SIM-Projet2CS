@@ -1,97 +1,82 @@
-import logging
+#!/usr/bin/env python3
+import argparse
 import sys
-from utils.calculate_distance import apply_bandwidth_limit, calculate_bandwidth, haversine
-from utils.distance_simulation import get_ueransim_coords_from_docker_compose, prompt_for_coordinates
-from utils.ping_and_measure import auth_ping_measure
+import logging
+from utils.apply_distance import prompt_for_coordinates, apply_distance
+from utils.ping_and_measure import (
+    auth_ping_measure, save_results, cleanup_ue_interfaces
+)
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 
 def main():
-    try:
-        # Import docker module at the beginning
+    # Define command line arguments
+    parser = argparse.ArgumentParser(description='Free5GC Network Testing Tool with Distance Simulation')
+    parser.add_argument('--skip-distance', action='store_true', help='Skip distance configuration')
+    parser.add_argument('-n', '--num_ues', type=int, default=1, help='Number of UEs to authenticate')
+    parser.add_argument('-s', '--packet_size', type=str, default='8', help='Ping packet size in bytes')
+    parser.add_argument('-c', '--config_prefix', type=str, default='config/uecfg', help='Prefix for UE config files')
+    parser.add_argument('-r', '--restart', action='store_true', help='Restart all UE processes')
+    parser.add_argument('-p', '--ping_count', type=int, default=5, help='Number of ping packets per interface')
+    parser.add_argument('-i', '--interval', type=str, default='0.02', help='Interval between pings in seconds')
+    parser.add_argument('-q', '--qos', type=str, default='0xb8', help='QoS value in hex format')
+    parser.add_argument('--skip-ping', action='store_true', help='Skip ping measurements')
+    args = parser.parse_args()
+
+    print("\n=== Free5GC Network Testing Tool ===\n")
+    
+    # Step 1: Configure distance-based bandwidth limitations (unless skipped)
+    if not args.skip_distance:
+        print("\n=== Configuration des limitations de bande passante basées sur la distance ===\n")
+        coordinates = prompt_for_coordinates() 
+        success = apply_distance(coordinates)
+        if success:
+            print("Configuration des distances terminée avec succès.")
+        else:
+            print("Erreur lors de la configuration des distances.")
+            if not args.skip_ping:
+                user_continue = input("Voulez-vous continuer avec les tests ping malgré l'erreur ? (o/n): ")
+                if user_continue.lower() != 'o':
+                    sys.exit(1)
+    
+    # Step 2: Perform ping measurements (unless skipped)
+    if not args.skip_ping:
+        print("\n=== Exécution des tests de ping ===\n")
         try:
-            import docker
-        except ImportError:
-            logging.error("Install docker SDK: pip3 install docker")
-            sys.exit(1)
-            
-        # Get UERANSIM coordinates from docker-compose file
-        ueransim_lat, ueransim_lon = get_ueransim_coords_from_docker_compose()
-        
-        # Prompt user for i-upf and psa-upf coordinates
-        i_upf_lat, i_upf_lon, psa_upf_lat, psa_upf_lon = prompt_for_coordinates(
-            ueransim_lat, ueransim_lon
-        )
-        
-        # Calculate distances
-        distance_ue_upfi = haversine(ueransim_lat, ueransim_lon, i_upf_lat, i_upf_lon)
-        distance_upfi_psa = haversine(i_upf_lat, i_upf_lon, psa_upf_lat, psa_upf_lon)
-        
-        # Calculate bandwidths
-        bw_ue_upfi = calculate_bandwidth(distance_ue_upfi)
-        bw_upfi_psa = calculate_bandwidth(distance_upfi_psa)
-        
-        # Display results
-        print("\nRésultats calculés:")
-        print(f"Distance ueransim → i-upf: {distance_ue_upfi:.2f} km")
-        print(f"Bande passante estimée: {bw_ue_upfi:.2f} Mbps")
-        print(f"Distance i-upf → psa-upf: {distance_upfi_psa:.2f} km")
-        print(f"Bande passante estimée: {bw_upfi_psa:.2f} Mbps")
-        
-        # Now always apply bandwidth limitations without asking
-        print("\nApplication des limitations de bande passante aux conteneurs...")
+            # Clean up UE interfaces first if restart flag is set
+            if args.restart:
+                cleanup_ue_interfaces()
                 
-        client = docker.from_env()
-        
-        try:
-            # Get containers
-            ueransim = client.containers.get("ueransim")
-            upf_i = client.containers.get("i-upf")
-            upf_psa = client.containers.get("psa-upf")
+            # Perform authentication and ping measurements
+            success, all_results = auth_ping_measure(
+                args.num_ues,
+                args.packet_size,
+                args.config_prefix,
+                args.ping_count,
+                args.interval,
+                args.qos
+            )
             
-            # Set network interfaces
-            i_upf_iface = "upfgtp"
-            psa_upf_iface = "upfgtp"
-            
-            # Apply bandwidth limitations
-            # ue - i-upf
-            apply_bandwidth_limit(upf_i, i_upf_iface, bw_ue_upfi)
-            logging.info(f"Limitation entre ueransim → i-upf : {distance_ue_upfi:.1f}km, {bw_ue_upfi:.2f} Mbps")
-            
-            # i-upf -- psa-upf
-            apply_bandwidth_limit(upf_psa, psa_upf_iface, bw_upfi_psa)
-            logging.info(f"Limitation entre i-upf → psa-upf : {distance_upfi_psa:.1f}km, {bw_upfi_psa:.2f} Mbps")
-            
-            print("\nLimitations de bande passante appliquées avec succès!")
+            if success:
+                # Save results
+                save_results(all_results, args.packet_size)
+                print("Tests de ping terminés avec succès.")
+            else:
+                print("Erreur lors des tests de ping.")
+                sys.exit(1)
+                
+            # Clean up UE interfaces
+            cleanup_ue_interfaces()
             
         except Exception as e:
-            logging.error(f"Erreur lors de l'application des limitations: {str(e)}")
+            logging.error(f"Erreur lors des tests de ping: {str(e)}")
             sys.exit(1)
-        
-        sys.exit(0)
-
-        num_ues = 1
-        packet_size = "64"           # Optional: use DEFAULT_PACKET_SIZE if you prefer
-        config_prefix = "config/uecfg"
-        ping_count = 10
-        interval = "0.02"            # Optional: use DEFAULT_INTERVAL
-        qos = "0xb8"                 # Optional: use DEFAULT_QOS
-
-        success, results = auth_ping_measure(
-            num_ues=num_ues,
-            packet_size=packet_size,
-            config_prefix=config_prefix,
-            ping_count=ping_count,
-            interval=interval,
-            qos=qos
-            )
-
-        if success:
-            print("[INFO] Ping test completed successfully.")
-        else:
-            print("[ERROR] Ping test failed.")
-        
-    except Exception as e:
-        logging.error(f"Fatal error: {str(e)}")
-        sys.exit(1)
+    
+    print("\n=== Traitement terminé ===")
 
 if __name__ == "__main__":
     main()
