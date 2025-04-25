@@ -27,7 +27,7 @@ This project provides a framework for simulating UPF (User Plane Function) place
 ### Setup
 1. Clone the repository:
     ```bash
-    git clone <your-repo-url>
+    git clone https://github.com/minaiscoding/upf-placement-simulator
     cd upf-placement-simulator
     ```
 2. (Optional) Create and activate a virtual environment:
