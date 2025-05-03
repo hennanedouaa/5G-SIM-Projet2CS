@@ -17,7 +17,7 @@ services:
           
   free5gc-upf-2:
     container_name: upf-2
-    image: custom-upf-owamp:latest
+    image: ikramdh18/custom-upf-owamp:latest
     command: bash -c "/free5gc/upf-iptables.sh && /free5gc/upf -c /free5gc/config/upfcfg.yaml"
     volumes:
       - ./config/upf2cfg.yaml:/free5gc/config/upfcfg.yaml
@@ -300,7 +300,7 @@ services:
 
   ueransim:
     container_name: ueransim
-    image: custom-ueransim-owamp:latest
+    image: ikramdh18/custom-ueransim-owamp:latest
     command: ./nr-gnb -c ./config/gnbcfg.yaml
     volumes:
       - ./config/gnbcfg.yaml:/ueransim/config/gnbcfg.yaml
