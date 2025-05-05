@@ -17,6 +17,30 @@ services:
       privnet:
         aliases:
           - upf.free5gc.org
+  private_server:
+    container_name: private_server
+    image: ubuntu:latest # Utilisation de l'image Ubuntu pour un environnement plus complet
+    command: >
+      bash -c "
+        apt update && 
+        apt install -y iptables iproute2 iputils-ping net-tools curl tcpdump vim yq &&
+        chmod +x /app/private-server-init.sh && 
+        /app/private-server-init.sh && 
+        tail -f /dev/null
+      "
+    cap_add:
+      - NET_ADMIN # Ajouter la capacité d'administration réseau (nécessaire pour les commandes réseau comme ip, iptables)
+    volumes:
+      - ./config/private-server.yaml:/app/config.yaml
+      - ./config/private-server-init.sh:/app/private-server-init.sh # Script combiné
+
+    hostname: "private_server" # Nom d'hôte personnalisé
+    networks:
+      privnet:
+        aliases:
+          - private-server.free5gc.org
+    depends_on:
+      - ueransim
 
   db:
     container_name: mongodb
@@ -284,7 +308,7 @@ services:
     command: ./nef -c ./config/nefcfg.yaml
     expose:
       - "8000"
-    volumes: 
+    volumes:
       - ./config/nefcfg.yaml:/free5gc/config/nefcfg.yaml
       - ./cert:/free5gc/cert
     environment:
