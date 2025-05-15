@@ -1,4 +1,22 @@
-def generate_upf_config(hostname, is_edge=False, is_psa=False, is_server=False):
+#!/usr/bin/env python3
+"""
+Free5GC UPF Configuration Generator
+-----------------------------------
+This script generates configuration files for a Free5GC deployment with 
+multiple UPFs in a specified topology.
+
+Parameters:
+- num_upfs: Total number of UPFs (including one PSA-UPF and intermediate UPFs)
+- edge_upfs: Number of edge UPFs that connect directly to gNB
+"""
+
+import os
+import yaml
+import argparse
+from pathlib import Path
+
+
+def generate_upf_config(hostname, is_edge=False, is_psa=False):
     """Generate UPF configuration file for a specific UPF node"""
     
     config = {
@@ -45,14 +63,10 @@ def generate_upf_config(hostname, is_edge=False, is_psa=False, is_server=False):
             }
         )
     
-    # Custom server specific configuration
-    if is_server:
-        config["dnnList"][0]["cidr"] = "10.70.0.0/16"  # Different IP range for server
-    
     return config
 
 
-def generate_docker_compose(num_upfs, edge_upfs, is_server=False):
+def generate_docker_compose(num_upfs, edge_upfs):
     """Generate docker-compose configuration for the specified number of UPFs"""
     
     services = {}
@@ -93,24 +107,6 @@ def generate_docker_compose(num_upfs, edge_upfs, is_server=False):
             }
         }
     }
-    
-    # Generate custom server UPF if enabled
-    if is_server:
-        services["free5gc-custom-server"] = {
-            "container_name": "custom-server",
-            "image": "free5gc/upf:v4.0.1",
-            "command": "bash -c \"./upf-iptables.sh && ./upf -c ./config/upfcfg.yaml\"",
-            "volumes": [
-                "./config/custom/upfcfg-custom-server.yaml:/free5gc/config/upfcfg.yaml",
-                "./config/upf-iptables.sh:/free5gc/upf-iptables.sh"
-            ],
-            "cap_add": ["NET_ADMIN"],
-            "networks": {
-                "privnet": {
-                    "aliases": ["custom-server.free5gc.org"]
-                }
-            }
-        }
     
     # Add other existing standard services (reuse from the provided configuration)
     standard_services = {
@@ -232,9 +228,6 @@ def generate_docker_compose(num_upfs, edge_upfs, is_server=False):
         hostname = f"i-upf{i}" if i > 1 else "i-upf"
         upf_dependencies.append(f"free5gc-{hostname}")
     upf_dependencies.append("free5gc-psa-upf")
-    
-    if is_server:
-        upf_dependencies.append("free5gc-custom-server")
     
     services["free5gc-smf"] = {
         "container_name": "smf",
@@ -371,9 +364,6 @@ def generate_docker_compose(num_upfs, edge_upfs, is_server=False):
         ueransim_dependencies.append(f"free5gc-{hostname}")
     ueransim_dependencies.append("free5gc-psa-upf")
     
-    if is_server:
-        ueransim_dependencies.append("free5gc-custom-server")
-    
     services["ueransim"] = {
         "container_name": "ueransim",
         "image": "free5gc/ueransim:latest",
@@ -417,7 +407,7 @@ def generate_docker_compose(num_upfs, edge_upfs, is_server=False):
     return compose
 
 
-def generate_smf_config(num_upfs, edge_upfs, is_server=False):
+def generate_smf_config(num_upfs, edge_upfs):
     """Generate SMF configuration with proper UPF topology"""
     
     smf_config = {
@@ -582,41 +572,8 @@ def generate_smf_config(num_upfs, edge_upfs, is_server=False):
                 "networkInstances": ["internet"]
             }
         ]
-    }
-    
-    # Add custom server UPF if enabled
-    if is_server:
-        smf_config["configuration"]["userplaneInformation"]["upNodes"]["CUSTOM-SERVER"] = {
-            "type": "UPF",
-            "nodeID": "custom-server.free5gc.org",
-            "sNssaiUpfInfos": [
-                {
-                    "sNssai": {
-                        "sst": 1,
-                        "sd": "010203"
-                    },
-                    "dnnUpfInfoList": [
-                        {
-                            "dnn": "internet",
-                            "pools": [
-                                {
-                                    "cidr": "10.70.0.0/16"
-                                }
-                            ]
-                        }
-                    ]
-                }
-            ],
-            "interfaces": [
-                {
-                    "interfaceType": "N9",
-                    "endpoints": ["custom-server.free5gc.org"],
-                    "networkInstances": ["internet"]
-                }
-            ]
-        }
-    
-    # Generate linear links between nodes
+    }    
+      # Generate linear links between nodes
     links = []
 
     # First link: gNB1 to first UPF
@@ -641,21 +598,13 @@ def generate_smf_config(num_upfs, edge_upfs, is_server=False):
         "A": last_upf.upper(),
         "B": "PSA-UPF"
     })
-    
-    # Add link from PSA-UPF to custom server if enabled
-    if is_server:
-        links.append({
-            "A": "PSA-UPF",
-            "B": "CUSTOM-SERVER"
-        })
+
     
     # Add links to SMF config
     smf_config["configuration"]["userplaneInformation"]["links"] = links
     
     return smf_config
-
-
-def generate_uerouting_config(num_upfs, edge_upfs, is_server=False):
+def generate_uerouting_config(num_upfs, edge_upfs):
     """Generate UE routing configuration with default path through all UPFs"""
     
     # Create the default path through all UPFs
@@ -684,22 +633,12 @@ def generate_uerouting_config(num_upfs, edge_upfs, is_server=False):
         "B": "PSA-UPF"
     })
     
-    # Add link to custom server if enabled
-    if is_server:
-        topology.append({
-            "A": "PSA-UPF",
-            "B": "CUSTOM-SERVER"
-        })
-    
     # Create a default path for specific traffic
     path = []
     for i in range(1, num_upfs):
         upf_name = f"I-UPF{i}" if i > 1 else "I-UPF"
         path.append(upf_name)
     path.append("PSA-UPF")
-    
-    if is_server:
-        path.append("CUSTOM-SERVER")
     
     ue_routing = {
         "info": {
@@ -736,4 +675,3 @@ def generate_uerouting_config(num_upfs, edge_upfs, is_server=False):
     }
     
     return ue_routing
-
