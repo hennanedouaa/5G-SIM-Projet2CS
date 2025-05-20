@@ -4,10 +4,10 @@ import re
 import os
 import threading
 
+results_summary = []  # List to store metrics from all UE interfaces
+
 def get_ue_interfaces(client_container):
     interfaces = subprocess.check_output(["docker", "exec", client_container, "ip", "addr"], text=True)
-
-    # Extract interfaces that likely belong to UE (adjust this regex if needed)
     ue_ifaces = re.findall(r'\d+: (uesimtun\d+):', interfaces)
     return ue_ifaces
 
@@ -24,7 +24,7 @@ def run_owping_from_interface(client_container, server_ip, iface, packet_size, p
 
     try:
         output = subprocess.check_output(cmd, text=True, stderr=subprocess.STDOUT)
-        block = output.split('--- owping statistics')[1].split('--- owping statistics')[0]
+        block = output.split('--- owping statistics')[1]
 
         sent_match = re.search(r'(\d+) sent, (\d+) lost.*?([\d.]+)%', block)
         delay_match = re.search(r'one-way delay min/median/max = ([\d.]+)/([\d.]+)/([\d.]+)', block)
@@ -37,9 +37,22 @@ def run_owping_from_interface(client_container, server_ip, iface, packet_size, p
         sent = int(sent_match.group(1))
         lost = int(sent_match.group(2))
         loss_pct = float(sent_match.group(3))
-        delay_min, delay_median, delay_max = delay_match.groups()
-        jitter = jitter_match.group(1)
+        delay_min = float(delay_match.group(1))
+        delay_median = float(delay_match.group(2))
+        delay_max = float(delay_match.group(3))
+        jitter = float(jitter_match.group(1))
 
+        # Store values for global summary
+        results_summary.append({
+            "iface": iface,
+            "loss_pct": loss_pct,
+            "delay_min": delay_min,
+            "delay_median": delay_median,
+            "delay_max": delay_max,
+            "jitter": jitter
+        })
+
+        # Write per-interface results
         timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         results = f"\n{'='*50}\n"
         results += f"TEST TIMESTAMP: {timestamp}\n"
@@ -57,12 +70,14 @@ def run_owping_from_interface(client_container, server_ip, iface, packet_size, p
         with open(result_file, "a") as f:
             f.write(results)
 
-        print(f"[✓] {iface}: {sent} packets sent, {lost} lost ({loss_pct:.3f}%), median delay: {delay_median}ms")
+        print(f"[✓] {iface}: median={delay_median}ms, loss={loss_pct:.2f}%, jitter={jitter}ms")
 
     except subprocess.CalledProcessError as e:
         print(f"[ERROR] Failed owping from {iface}: {e.output}")
 
 def measure_traffic_metrics(client_container, server_container, packet_size, packet_count, interval):
+    global results_summary
+    results_summary = []  # Reset results
     result_file = "network_metrics.txt"
 
     # Get server IP
@@ -74,7 +89,6 @@ def measure_traffic_metrics(client_container, server_container, packet_size, pac
 
     timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-    # Start OWAMP server
     print(f"[INFO] Starting OWAMP server on {server_container} ({server_ip})...")
     subprocess.Popen([
         "docker", "exec", server_container, "owampd", "-f", "-v"
@@ -90,8 +104,6 @@ def measure_traffic_metrics(client_container, server_container, packet_size, pac
     print(f"[INFO] Found UE interfaces: {', '.join(ue_interfaces)}")
     print("[INFO] Running traffic measurements in parallel... please wait.")
 
-
-    # Write header block once for the whole test
     with open(result_file, "a") as f:
         f.write("\n" + "="*70 + "\n")
         f.write(f"NETWORK METRICS TEST: {timestamp}\n")
@@ -99,7 +111,6 @@ def measure_traffic_metrics(client_container, server_container, packet_size, pac
         f.write(f"Parameters: {packet_count} packets, {packet_size} bytes, {interval}s interval\n")
         f.write("="*70 + "\n")
 
-    # Launch all owping tests in parallel threads
     threads = []
     for iface in ue_interfaces:
         t = threading.Thread(
@@ -112,8 +123,26 @@ def measure_traffic_metrics(client_container, server_container, packet_size, pac
     for t in threads:
         t.join()
 
-    # Close block after all tests
-    with open(result_file, "a") as f:
-        f.write("="*70 + "\n")
+    # Write global summary
+    if results_summary:
+        avg_latency = sum(r["delay_median"] for r in results_summary) / len(results_summary)
+        min_latency = min(r["delay_min"] for r in results_summary)
+        max_latency = max(r["delay_max"] for r in results_summary)
+        avg_loss = sum(r["loss_pct"] for r in results_summary) / len(results_summary)
+        avg_jitter = sum(r["jitter"] for r in results_summary) / len(results_summary)
+
+        summary = "\n" + "="*50 + "\n"
+        summary += f"GLOBAL METRICS SUMMARY ({timestamp})\n"
+        summary += f"Average Latency (median): {avg_latency:.3f} ms\n"
+        summary += f"Minimum Latency: {min_latency:.3f} ms\n"
+        summary += f"Maximum Latency: {max_latency:.3f} ms\n"
+        summary += f"Average Packet Loss: {avg_loss:.3f}%\n"
+        summary += f"Average Jitter: {avg_jitter:.3f} ms\n"
+        summary += "="*50 + "\n"
+
+        with open(result_file, "a") as f:
+            f.write(summary)
+
+        print(summary)
 
     print(f"[SUCCESS] All tests completed. Results saved to {result_file}.")
