@@ -14,11 +14,10 @@ gtpu:
       type: N3
 
 dnnList:
-  - dnn: internet
+  - dnn: private_server
     cidr: 10.60.0.0/16
 
 logger:
   enable: true
   level: info
   reportCaller: false
-
