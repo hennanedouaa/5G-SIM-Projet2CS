@@ -1,4 +1,22 @@
-def generate_upf_config(hostname, is_edge=False, is_psa=False, is_server=False):
+#!/usr/bin/env python3
+"""
+Free5GC UPF Configuration Generator
+-----------------------------------
+This script generates configuration files for a Free5GC deployment with 
+multiple UPFs in a specified topology.
+
+Parameters:
+- num_upfs: Total number of UPFs (including one PSA-UPF and intermediate UPFs)
+- edge_upfs: Number of edge UPFs that connect directly to gNB
+"""
+
+import os
+import yaml
+import argparse
+from pathlib import Path
+
+
+def generate_upf_config(hostname, is_edge=False, is_psa=False):
     """Generate UPF configuration file for a specific UPF node"""
     
     config = {
@@ -16,7 +34,7 @@ def generate_upf_config(hostname, is_edge=False, is_psa=False, is_server=False):
         },
         "dnnList": [
             {
-                "dnn": "remote-surgery",
+                "dnn": "internet",
                 "cidr": "10.60.0.0/16"
             }
         ],
@@ -45,14 +63,10 @@ def generate_upf_config(hostname, is_edge=False, is_psa=False, is_server=False):
             }
         )
     
-    # Custom server specific configuration
-    if is_server:
-        config["dnnList"][0]["cidr"] = "10.70.0.0/16"  # Different IP range for server
-    
     return config
 
 
-def generate_docker_compose(num_upfs, edge_upfs, is_server=False):
+def generate_docker_compose(num_upfs, edge_upfs):
     """Generate docker-compose configuration for the specified number of UPFs"""
     
     services = {}
@@ -78,40 +92,21 @@ def generate_docker_compose(num_upfs, edge_upfs, is_server=False):
         }
     
     # Generate PSA UPF service
-    services["free5gc-remote-surgery"] = {
-        "container_name": "remote-surgery",
-        "image": "ikramdh18/custom-upf-owamp:latest",
+    services["free5gc-psa-upf"] = {
+        "container_name": "psa-upf",
+        "image": "free5gc/upf:v4.0.1",
         "command": "bash -c \"./upf-iptables.sh && ./upf -c ./config/upfcfg.yaml\"",
         "volumes": [
             "./config/custom/upfcfg-psa-upf.yaml:/free5gc/config/upfcfg.yaml",
-            "./config/upf-iptables.sh:/free5gc/upf-iptables.sh",
-            "./owamp_data:/var/lib/owamp"
+            "./config/upf-iptables.sh:/free5gc/upf-iptables.sh"
         ],
         "cap_add": ["NET_ADMIN"],
         "networks": {
             "privnet": {
-                "aliases": ["remote-surgery.free5gc.org"]
+                "aliases": ["psa-upf.free5gc.org"]
             }
         }
     }
-
-    # Generate custom server UPF if enabled
-    if is_server:
-        services["free5gc-custom-server"] = {
-            "container_name": "custom-server",
-            "image": "free5gc/upf:v4.0.1",
-            "command": "bash -c \"./upf-iptables.sh && ./upf -c ./config/upfcfg.yaml\"",
-            "volumes": [
-                "./config/custom/upfcfg-custom-server.yaml:/free5gc/config/upfcfg.yaml",
-                "./config/upf-iptables.sh:/free5gc/upf-iptables.sh"
-            ],
-            "cap_add": ["NET_ADMIN"],
-            "networks": {
-                "privnet": {
-                    "aliases": ["custom-server.free5gc.org"]
-                }
-            }
-        }
     
     # Add other existing standard services (reuse from the provided configuration)
     standard_services = {
@@ -232,10 +227,7 @@ def generate_docker_compose(num_upfs, edge_upfs, is_server=False):
     for i in range(1, num_upfs):
         hostname = f"i-upf{i}" if i > 1 else "i-upf"
         upf_dependencies.append(f"free5gc-{hostname}")
-    upf_dependencies.append("free5gc-remote-surgery")
-    
-    if is_server:
-        upf_dependencies.append("free5gc-custom-server")
+    upf_dependencies.append("free5gc-psa-upf")
     
     services["free5gc-smf"] = {
         "container_name": "smf",
@@ -370,30 +362,26 @@ def generate_docker_compose(num_upfs, edge_upfs, is_server=False):
     for i in range(1, num_upfs):
         hostname = f"i-upf{i}" if i > 1 else "i-upf"
         ueransim_dependencies.append(f"free5gc-{hostname}")
-    ueransim_dependencies.append("free5gc-remote-surgery")
-    
-    if is_server:
-        ueransim_dependencies.append("free5gc-custom-server")
+    ueransim_dependencies.append("free5gc-psa-upf")
     
     services["ueransim"] = {
-    "container_name": "ueransim",
-    "image": "free5gc/ueransim:latest",
-    "command": "bash /ueransim/config/start-ue.sh",
-    "volumes": [
-        "./config/start-ue.sh:/ueransim/config/start-ue.sh",
-        "./config/gnbcfg.yaml:/ueransim/config/gnbcfg.yaml",
-        "./config/custom/ue:/ueransim/config/ue"
-    ],
-    "cap_add": ["NET_ADMIN"],
-    "devices": ["/dev/net/tun"],
-    "networks": {
-        "privnet": {
-            "aliases": ["gnb.free5gc.org"]
-        }
-    },
-    "depends_on": ueransim_dependencies
-}
-
+        "container_name": "ueransim",
+        "image": "free5gc/ueransim:latest",
+        "command": "./nr-gnb -c ./config/gnbcfg.yaml",
+        "volumes": [
+            "./config/gnbcfg.yaml:/ueransim/config/gnbcfg.yaml",
+            "./config/uecfg-custom.yaml:/ueransim/config/uecfg.yaml"
+        ],
+        "cap_add": ["NET_ADMIN"],
+        "devices": ["/dev/net/tun"],
+        "networks": {
+            "privnet": {
+                "aliases": ["gnb.free5gc.org"]
+            }
+        },
+        "depends_on": ueransim_dependencies
+    }
+    
     # Full docker-compose config
     compose = {
         "version": "3.8",
@@ -419,7 +407,7 @@ def generate_docker_compose(num_upfs, edge_upfs, is_server=False):
     return compose
 
 
-def generate_smf_config(num_upfs, edge_upfs, is_server=False):
+def generate_smf_config(num_upfs, edge_upfs):
     """Generate SMF configuration with proper UPF topology"""
     
     smf_config = {
@@ -452,7 +440,7 @@ def generate_smf_config(num_upfs, edge_upfs, is_server=False):
                     },
                     "dnnInfos": [
                         {
-                            "dnn": "remote-surgery",
+                            "dnn": "internet",
                             "dnaiList": ["mec"],
                             "dns": {
                                 "ipv4": "8.8.8.8",
@@ -529,7 +517,7 @@ def generate_smf_config(num_upfs, edge_upfs, is_server=False):
                     },
                     "dnnUpfInfoList": [
                         {
-                            "dnn": "remote-surgery",
+                            "dnn": "internet",
                             "dnaiList": ["mec"]
                         }
                     ]
@@ -543,22 +531,22 @@ def generate_smf_config(num_upfs, edge_upfs, is_server=False):
             upf_node["interfaces"].append({
                 "interfaceType": "N3",
                 "endpoints": [f"{hostname}.free5gc.org"],
-                "networkInstances": ["remote-surgery"]
+                "networkInstances": ["internet"]
             })
         
         # Add N9 interface for all intermediate UPFs
         upf_node["interfaces"].append({
             "interfaceType": "N9",
             "endpoints": [f"{hostname}.free5gc.org"],
-            "networkInstances": ["remote-surgery"]
+            "networkInstances": ["internet"]
         })
         
         smf_config["configuration"]["userplaneInformation"]["upNodes"][hostname.upper()] = upf_node
     
     # Add PSA UPF node
-    smf_config["configuration"]["userplaneInformation"]["upNodes"]["REMOTE-SURGERY"] = {
+    smf_config["configuration"]["userplaneInformation"]["upNodes"]["PSA-UPF"] = {
         "type": "UPF",
-        "nodeID": "remote-surgery.free5gc.org",
+        "nodeID": "psa-upf.free5gc.org",
         "sNssaiUpfInfos": [
             {
                 "sNssai": {
@@ -567,7 +555,7 @@ def generate_smf_config(num_upfs, edge_upfs, is_server=False):
                 },
                 "dnnUpfInfoList": [
                     {
-                        "dnn": "remote-surgery",
+                        "dnn": "internet",
                         "pools": [
                             {
                                 "cidr": "10.60.0.0/16"
@@ -580,45 +568,12 @@ def generate_smf_config(num_upfs, edge_upfs, is_server=False):
         "interfaces": [
             {
                 "interfaceType": "N9",
-                "endpoints": ["remote-surgery.free5gc.org"],
-                "networkInstances": ["remote-surgery"]
+                "endpoints": ["psa-upf.free5gc.org"],
+                "networkInstances": ["internet"]
             }
         ]
-    }
-    
-    # Add custom server UPF if enabled
-    if is_server:
-        smf_config["configuration"]["userplaneInformation"]["upNodes"]["CUSTOM-SERVER"] = {
-            "type": "UPF",
-            "nodeID": "custom-server.free5gc.org",
-            "sNssaiUpfInfos": [
-                {
-                    "sNssai": {
-                        "sst": 1,
-                        "sd": "010203"
-                    },
-                    "dnnUpfInfoList": [
-                        {
-                            "dnn": "remote-surgery",
-                            "pools": [
-                                {
-                                    "cidr": "10.70.0.0/16"
-                                }
-                            ]
-                        }
-                    ]
-                }
-            ],
-            "interfaces": [
-                {
-                    "interfaceType": "N9",
-                    "endpoints": ["custom-server.free5gc.org"],
-                    "networkInstances": ["remote-surgery"]
-                }
-            ]
-        }
-    
-    # Generate linear links between nodes
+    }    
+      # Generate linear links between nodes
     links = []
 
     # First link: gNB1 to first UPF
@@ -641,23 +596,15 @@ def generate_smf_config(num_upfs, edge_upfs, is_server=False):
     last_upf = f"i-upf{num_upfs - 1}" if num_upfs > 2 else "i-upf"
     links.append({
         "A": last_upf.upper(),
-        "B": "REMOTE-SURGERY"
+        "B": "PSA-UPF"
     })
-    
-    # Add link from PSA-UPF to custom server if enabled
-    if is_server:
-        links.append({
-            "A": "REMOTE-SURGERY",
-            "B": "CUSTOM-SERVER"
-        })
+
     
     # Add links to SMF config
     smf_config["configuration"]["userplaneInformation"]["links"] = links
     
     return smf_config
-
-
-def generate_uerouting_config(num_upfs, edge_upfs, is_server=False):
+def generate_uerouting_config(num_upfs, edge_upfs):
     """Generate UE routing configuration with default path through all UPFs"""
     
     # Create the default path through all UPFs
@@ -683,25 +630,15 @@ def generate_uerouting_config(num_upfs, edge_upfs, is_server=False):
     last_i_upf = f"I-UPF{num_upfs-1}" if num_upfs > 2 else "I-UPF"
     topology.append({
         "A": last_i_upf,
-        "B": "REMOTE-SURGERY"
+        "B": "PSA-UPF"
     })
-    
-    # Add link to custom server if enabled
-    if is_server:
-        topology.append({
-            "A": "REMOTE-SURGERY",
-            "B": "CUSTOM-SERVER"
-        })
     
     # Create a default path for specific traffic
     path = []
     for i in range(1, num_upfs):
         upf_name = f"I-UPF{i}" if i > 1 else "I-UPF"
         path.append(upf_name)
-    path.append("REMOTE-SURGERY")
-    
-    if is_server:
-        path.append("CUSTOM-SERVER")
+    path.append("PSA-UPF")
     
     ue_routing = {
         "info": {
@@ -738,4 +675,3 @@ def generate_uerouting_config(num_upfs, edge_upfs, is_server=False):
     }
     
     return ue_routing
-

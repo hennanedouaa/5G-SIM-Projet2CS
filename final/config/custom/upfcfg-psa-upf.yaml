@@ -1,0 +1,19 @@
+description: UPF initial local configuration for psa-upf
+dnnList:
+- cidr: 10.60.0.0/16
+  dnn: internet
+gtpu:
+  forwarder: gtp5g
+  ifList:
+  - addr: psa-upf.free5gc.org
+    type: N9
+logger:
+  enable: true
+  level: info
+  reportCaller: false
+pfcp:
+  addr: psa-upf.free5gc.org
+  maxRetrans: 3
+  nodeID: psa-upf.free5gc.org
+  retransTimeout: 1s
+version: 1.0.3
