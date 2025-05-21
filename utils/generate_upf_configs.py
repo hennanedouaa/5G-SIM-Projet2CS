@@ -78,8 +78,8 @@ def generate_docker_compose(num_upfs, edge_upfs, is_server=False):
         }
     
     # Generate PSA UPF service
-    services["free5gc-psa-upf"] = {
-        "container_name": "psa-upf",
+    services["free5gc-remote-surgery"] = {
+        "container_name": "remote-surgery",
         "image": "ikramdh18/custom-upf-owamp:latest",
         "command": "bash -c \"./upf-iptables.sh && ./upf -c ./config/upfcfg.yaml\"",
         "volumes": [
@@ -90,28 +90,11 @@ def generate_docker_compose(num_upfs, edge_upfs, is_server=False):
         "cap_add": ["NET_ADMIN"],
         "networks": {
             "privnet": {
-                "aliases": ["psa-upf.free5gc.org"]
-            }
-        }
-    }
-    #Generate remote_srugery dnn 
-    services["remote-surgery"] = {
-        "container_name": "remote-surgery",
-        "image": "ikramdh18/custom-upf-owamp:latest",
-        "command": "bash -c \"./upf-iptables.sh && ./upf -c ./config/upfcfg.yaml\"",
-        "volumes": [
-            "./config/custom/upfcfg-remote-surgery.yaml:/free5gc/config/upfcfg.yaml",
-            "./config/upf-iptables.sh:/free5gc/upf-iptables.sh",
-            "./owamp_data:/var/lib/owamp"
-        ],
-        "hostname": "remote-surgery",
-        "cap_add": ["NET_ADMIN"],
-        "networks": {
-            "privnet": {
                 "aliases": ["remote-surgery.free5gc.org"]
             }
         }
     }
+
     # Generate custom server UPF if enabled
     if is_server:
         services["free5gc-custom-server"] = {
@@ -249,7 +232,7 @@ def generate_docker_compose(num_upfs, edge_upfs, is_server=False):
     for i in range(1, num_upfs):
         hostname = f"i-upf{i}" if i > 1 else "i-upf"
         upf_dependencies.append(f"free5gc-{hostname}")
-    upf_dependencies.append("free5gc-psa-upf")
+    upf_dependencies.append("free5gc-remote-surgery")
     
     if is_server:
         upf_dependencies.append("free5gc-custom-server")
@@ -387,7 +370,7 @@ def generate_docker_compose(num_upfs, edge_upfs, is_server=False):
     for i in range(1, num_upfs):
         hostname = f"i-upf{i}" if i > 1 else "i-upf"
         ueransim_dependencies.append(f"free5gc-{hostname}")
-    ueransim_dependencies.append("free5gc-psa-upf")
+    ueransim_dependencies.append("free5gc-remote-surgery")
     
     if is_server:
         ueransim_dependencies.append("free5gc-custom-server")
@@ -573,9 +556,9 @@ def generate_smf_config(num_upfs, edge_upfs, is_server=False):
         smf_config["configuration"]["userplaneInformation"]["upNodes"][hostname.upper()] = upf_node
     
     # Add PSA UPF node
-    smf_config["configuration"]["userplaneInformation"]["upNodes"]["PSA-UPF"] = {
+    smf_config["configuration"]["userplaneInformation"]["upNodes"]["REMOTE-SURGERY"] = {
         "type": "UPF",
-        "nodeID": "psa-upf.free5gc.org",
+        "nodeID": "remote-surgery.free5gc.org",
         "sNssaiUpfInfos": [
             {
                 "sNssai": {
@@ -597,7 +580,7 @@ def generate_smf_config(num_upfs, edge_upfs, is_server=False):
         "interfaces": [
             {
                 "interfaceType": "N9",
-                "endpoints": ["psa-upf.free5gc.org"],
+                "endpoints": ["remote-surgery.free5gc.org"],
                 "networkInstances": ["remote-surgery"]
             }
         ]
@@ -658,13 +641,13 @@ def generate_smf_config(num_upfs, edge_upfs, is_server=False):
     last_upf = f"i-upf{num_upfs - 1}" if num_upfs > 2 else "i-upf"
     links.append({
         "A": last_upf.upper(),
-        "B": "PSA-UPF"
+        "B": "REMOTE-SURGERY"
     })
     
     # Add link from PSA-UPF to custom server if enabled
     if is_server:
         links.append({
-            "A": "PSA-UPF",
+            "A": "REMOTE-SURGERY",
             "B": "CUSTOM-SERVER"
         })
     
@@ -700,13 +683,13 @@ def generate_uerouting_config(num_upfs, edge_upfs, is_server=False):
     last_i_upf = f"I-UPF{num_upfs-1}" if num_upfs > 2 else "I-UPF"
     topology.append({
         "A": last_i_upf,
-        "B": "PSA-UPF"
+        "B": "REMOTE-SURGERY"
     })
     
     # Add link to custom server if enabled
     if is_server:
         topology.append({
-            "A": "PSA-UPF",
+            "A": "REMOTE-SURGERY",
             "B": "CUSTOM-SERVER"
         })
     
@@ -715,7 +698,7 @@ def generate_uerouting_config(num_upfs, edge_upfs, is_server=False):
     for i in range(1, num_upfs):
         upf_name = f"I-UPF{i}" if i > 1 else "I-UPF"
         path.append(upf_name)
-    path.append("PSA-UPF")
+    path.append("REMOTE-SURGERY")
     
     if is_server:
         path.append("CUSTOM-SERVER")
