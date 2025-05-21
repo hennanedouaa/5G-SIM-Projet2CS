@@ -16,7 +16,7 @@ def generate_upf_config(hostname, is_edge=False, is_psa=False, is_server=False):
         },
         "dnnList": [
             {
-                "dnn": "internet",
+                "dnn": "remote-surgery",
                 "cidr": "10.60.0.0/16"
             }
         ],
@@ -80,11 +80,12 @@ def generate_docker_compose(num_upfs, edge_upfs, is_server=False):
     # Generate PSA UPF service
     services["free5gc-psa-upf"] = {
         "container_name": "psa-upf",
-        "image": "free5gc/upf:v4.0.1",
+        "image": "ikramdh18/custom-upf-owamp:latest",
         "command": "bash -c \"./upf-iptables.sh && ./upf -c ./config/upfcfg.yaml\"",
         "volumes": [
             "./config/custom/upfcfg-psa-upf.yaml:/free5gc/config/upfcfg.yaml",
-            "./config/upf-iptables.sh:/free5gc/upf-iptables.sh"
+            "./config/upf-iptables.sh:/free5gc/upf-iptables.sh",
+            "./owamp_data:/var/lib/owamp"
         ],
         "cap_add": ["NET_ADMIN"],
         "networks": {
@@ -93,7 +94,24 @@ def generate_docker_compose(num_upfs, edge_upfs, is_server=False):
             }
         }
     }
-    
+    #Generate remote_srugery dnn 
+    services["remote-surgery"] = {
+        "container_name": "remote-surgery",
+        "image": "ikramdh18/custom-upf-owamp:latest",
+        "command": "bash -c \"./upf-iptables.sh && ./upf -c ./config/upfcfg.yaml\"",
+        "volumes": [
+            "./config/custom/upfcfg-remote-surgery.yaml:/free5gc/config/upfcfg.yaml",
+            "./config/upf-iptables.sh:/free5gc/upf-iptables.sh",
+            "./owamp_data:/var/lib/owamp"
+        ],
+        "hostname": "remote-surgery",
+        "cap_add": ["NET_ADMIN"],
+        "networks": {
+            "privnet": {
+                "aliases": ["remote-surgery.free5gc.org"]
+            }
+        }
+    }
     # Generate custom server UPF if enabled
     if is_server:
         services["free5gc-custom-server"] = {
@@ -376,11 +394,12 @@ def generate_docker_compose(num_upfs, edge_upfs, is_server=False):
     
     services["ueransim"] = {
         "container_name": "ueransim",
-        "image": "free5gc/ueransim:latest",
+        "image": "ikramdh18/custom-ueransim-owamp:latest",
         "command": "./nr-gnb -c ./config/gnbcfg.yaml",
         "volumes": [
             "./config/gnbcfg.yaml:/ueransim/config/gnbcfg.yaml",
-            "./config/uecfg-custom.yaml:/ueransim/config/uecfg.yaml"
+            "./config/uecfg-custom.yaml:/ueransim/config/uecfg.yaml",
+            "./owamp_data:/var/lib/owamp"
         ],
         "cap_add": ["NET_ADMIN"],
         "devices": ["/dev/net/tun"],
@@ -450,7 +469,7 @@ def generate_smf_config(num_upfs, edge_upfs, is_server=False):
                     },
                     "dnnInfos": [
                         {
-                            "dnn": "internet",
+                            "dnn": "remote-surgery",
                             "dnaiList": ["mec"],
                             "dns": {
                                 "ipv4": "8.8.8.8",
@@ -527,7 +546,7 @@ def generate_smf_config(num_upfs, edge_upfs, is_server=False):
                     },
                     "dnnUpfInfoList": [
                         {
-                            "dnn": "internet",
+                            "dnn": "remote-surgery",
                             "dnaiList": ["mec"]
                         }
                     ]
@@ -541,14 +560,14 @@ def generate_smf_config(num_upfs, edge_upfs, is_server=False):
             upf_node["interfaces"].append({
                 "interfaceType": "N3",
                 "endpoints": [f"{hostname}.free5gc.org"],
-                "networkInstances": ["internet"]
+                "networkInstances": ["remote-surgery"]
             })
         
         # Add N9 interface for all intermediate UPFs
         upf_node["interfaces"].append({
             "interfaceType": "N9",
             "endpoints": [f"{hostname}.free5gc.org"],
-            "networkInstances": ["internet"]
+            "networkInstances": ["remote-surgery"]
         })
         
         smf_config["configuration"]["userplaneInformation"]["upNodes"][hostname.upper()] = upf_node
@@ -565,7 +584,7 @@ def generate_smf_config(num_upfs, edge_upfs, is_server=False):
                 },
                 "dnnUpfInfoList": [
                     {
-                        "dnn": "internet",
+                        "dnn": "remote-surgery",
                         "pools": [
                             {
                                 "cidr": "10.60.0.0/16"
@@ -579,7 +598,7 @@ def generate_smf_config(num_upfs, edge_upfs, is_server=False):
             {
                 "interfaceType": "N9",
                 "endpoints": ["psa-upf.free5gc.org"],
-                "networkInstances": ["internet"]
+                "networkInstances": ["remote-surgery"]
             }
         ]
     }
@@ -597,7 +616,7 @@ def generate_smf_config(num_upfs, edge_upfs, is_server=False):
                     },
                     "dnnUpfInfoList": [
                         {
-                            "dnn": "internet",
+                            "dnn": "remote-surgery",
                             "pools": [
                                 {
                                     "cidr": "10.70.0.0/16"
@@ -611,7 +630,7 @@ def generate_smf_config(num_upfs, edge_upfs, is_server=False):
                 {
                     "interfaceType": "N9",
                     "endpoints": ["custom-server.free5gc.org"],
-                    "networkInstances": ["internet"]
+                    "networkInstances": ["remote-surgery"]
                 }
             ]
         }
