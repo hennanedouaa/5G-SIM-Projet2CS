@@ -1,0 +1,126 @@
+configuration:
+  locality: area1
+  nrfCertPem: cert/nrf.pem
+  nrfUri: http://nrf.free5gc.org:8000
+  pfcp:
+    externalAddr: smf.free5gc.org
+    heartbeatInterval: 5s
+    listenAddr: smf.free5gc.org
+    nodeID: smf.free5gc.org
+  plmnList:
+  - mcc: '208'
+    mnc: '93'
+  requestedUnit: 1000
+  sbi:
+    bindingIPv4: smf.free5gc.org
+    port: 8000
+    registerIPv4: smf.free5gc.org
+    scheme: http
+    tls:
+      key: cert/smf.key
+      pem: cert/smf.pem
+  serviceNameList:
+  - nsmf-pdusession
+  - nsmf-event-exposure
+  - nsmf-oam
+  smfName: SMF
+  snssaiInfos:
+  - dnnInfos:
+    - dnaiList:
+      - mec
+      dnn: internet
+      dns:
+        ipv4: 8.8.8.8
+        ipv6: 2001:4860:4860::8888
+    sNssai:
+      sd: '010203'
+      sst: 1
+  t3591:
+    enable: true
+    expireTime: 16s
+    maxRetryTimes: 3
+  t3592:
+    enable: true
+    expireTime: 16s
+    maxRetryTimes: 3
+  ueRouting:
+    enable: true
+    path: ./uerouting.yaml
+  ulcl: true
+  urrPeriod: 10
+  urrThreshold: 1000
+  userplaneInformation:
+    links:
+    - A: gNB1
+      B: I-UPF
+    - A: I-UPF
+      B: I-UPF2
+    - A: I-UPF2
+      B: PSA-UPF
+    upNodes:
+      I-UPF:
+        interfaces:
+        - endpoints:
+          - i-upf.free5gc.org
+          interfaceType: N3
+          networkInstances:
+          - internet
+        - endpoints:
+          - i-upf.free5gc.org
+          interfaceType: N9
+          networkInstances:
+          - internet
+        nodeID: i-upf.free5gc.org
+        sNssaiUpfInfos:
+        - dnnUpfInfoList:
+          - dnaiList:
+            - mec
+            dnn: internet
+          sNssai:
+            sd: '010203'
+            sst: 1
+        type: UPF
+      I-UPF2:
+        interfaces:
+        - endpoints:
+          - i-upf2.free5gc.org
+          interfaceType: N9
+          networkInstances:
+          - internet
+        nodeID: i-upf2.free5gc.org
+        sNssaiUpfInfos:
+        - dnnUpfInfoList:
+          - dnaiList:
+            - mec
+            dnn: internet
+          sNssai:
+            sd: '010203'
+            sst: 1
+        type: UPF
+      PSA-UPF:
+        interfaces:
+        - endpoints:
+          - psa-upf.free5gc.org
+          interfaceType: N9
+          networkInstances:
+          - internet
+        nodeID: psa-upf.free5gc.org
+        sNssaiUpfInfos:
+        - dnnUpfInfoList:
+          - dnn: internet
+            pools:
+            - cidr: 10.60.0.0/16
+          sNssai:
+            sd: '010203'
+            sst: 1
+        type: UPF
+      gNB1:
+        nodeID: gnb.free5gc.org
+        type: AN
+info:
+  description: SMF initial local configuration
+  version: 1.0.7
+logger:
+  enable: true
+  level: info
+  reportCaller: false

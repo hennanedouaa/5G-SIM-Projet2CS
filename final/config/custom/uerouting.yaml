@@ -1,0 +1,26 @@
+info:
+  description: Routing information for UE
+  version: 1.0.7
+pfdDataForApp:
+- applicationId: app1
+  pfds:
+  - flowDescriptions:
+    - permit out ip from 1.0.0.1/32 to 10.60.0.0/16
+    pfdID: pfd1
+ueRoutingInfo:
+  UE1:
+    members:
+    - imsi-208930000000001
+    specificPath:
+    - dest: 1.0.0.1/32
+      path:
+      - I-UPF
+      - I-UPF2
+      - PSA-UPF
+    topology:
+    - A: gNB1
+      B: I-UPF
+    - A: I-UPF
+      B: I-UPF2
+    - A: I-UPF2
+      B: PSA-UPF

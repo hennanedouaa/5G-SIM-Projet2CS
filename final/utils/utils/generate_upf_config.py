@@ -365,24 +365,23 @@ def generate_docker_compose(num_upfs, edge_upfs):
     ueransim_dependencies.append("free5gc-psa-upf")
     
     services["ueransim"] = {
-    "container_name": "ueransim",
-    "image": "free5gc/ueransim:latest",
-    "command": "bash /ueransim/config/start-ue.sh",
-    "volumes": [
-        "./config/start-ue.sh:/ueransim/config/start-ue.sh",
-        "./config/gnbcfg.yaml:/ueransim/config/gnbcfg.yaml",
-        "./config/custom/ue:/ueransim/config/ue"
-    ],
-    "cap_add": ["NET_ADMIN"],
-    "devices": ["/dev/net/tun"],
-    "networks": {
-        "privnet": {
-            "aliases": ["gnb.free5gc.org"]
-        }
-    },
-    "depends_on": ueransim_dependencies
-}
-
+        "container_name": "ueransim",
+        "image": "free5gc/ueransim:latest",
+        "command": "./nr-gnb -c ./config/gnbcfg.yaml",
+        "volumes": [
+            "./config/gnbcfg.yaml:/ueransim/config/gnbcfg.yaml",
+            "./config/uecfg-custom.yaml:/ueransim/config/uecfg.yaml"
+        ],
+        "cap_add": ["NET_ADMIN"],
+        "devices": ["/dev/net/tun"],
+        "networks": {
+            "privnet": {
+                "aliases": ["gnb.free5gc.org"]
+            }
+        },
+        "depends_on": ueransim_dependencies
+    }
+    
     # Full docker-compose config
     compose = {
         "version": "3.8",

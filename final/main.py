@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 from utils.distance import apply_distance
+from utils.insert import (login, insert_ue)
 from utils.generate_upf_configs import (
     generate_upf_config,
     generate_docker_compose,
@@ -12,6 +13,59 @@ import yaml
 import subprocess
 import time
 import docker
+from datetime import datetime
+import sys
+
+
+
+def generate_ue_configs(total_ues):
+    # Chemins des répertoires
+    scripts_dir = os.path.dirname(os.path.abspath(__file__))
+    config_dir = os.path.join(scripts_dir, 'config/custom/ue')
+
+    # Vérifier si le répertoire existe
+    if not os.path.exists(config_dir):
+        print(f"Le répertoire {config_dir} n'existe pas!")
+        return
+
+    # Lister les fichiers UE existants
+    existing_ues = [f for f in os.listdir(config_dir)
+                   if f.startswith('uecfg') and f.endswith('.yaml')]
+    existing_count = len(existing_ues)
+
+    # Vérifier si on a déjà assez de fichiers
+    if existing_count >= total_ues:
+        print(f"Il existe déjà {existing_count} fichiers UE (le total demandé est {total_ues})")
+        return
+
+    # Tenant ID (peut être personnalisé)
+    tenant_id = "6b8d30f1-c2a4-47e3-989b-72511aef87d8"
+
+    # Charger le modèle de configuration
+    template_path = os.path.join(config_dir, 'uecfg1.yaml')
+    if not os.path.exists(template_path):
+        print(f"Le fichier modèle {template_path} n'existe pas!")
+        return
+
+    with open(template_path, 'r') as f:
+        template = yaml.safe_load(f)
+
+    # Générer les nouveaux fichiers
+    for i in range(existing_count + 1, total_ues + 1):
+
+        # Générer le nom du fichier
+        new_filename = f"uecfg{i}.yaml"
+        new_filepath = os.path.join(config_dir, new_filename)
+
+        # Écrire le nouveau fichier
+        with open(new_filepath, 'w') as f:
+            yaml.dump(template, f, sort_keys=False)
+
+        print(f"Créé {new_filename}")
+
+        # Générer et exécuter les commandes MongoDB
+        insert_ue(i)
+        print(f"Données MongoDB insérées pour ue {i}")
 
 def check_upf_containers_running(num_upfs, timeout=60):
     """Check if all UPF containers are running"""
@@ -36,15 +90,62 @@ def check_upf_containers_running(num_upfs, timeout=60):
         print(f"Waiting for UPF containers to start... ({running_upfs}/{expected_upfs} running)")
     
     return False
+    
+def connect_ues():
+    """Executes nr-ue inside the UERANSIM container for each UE config file"""
+    try:
+        client = docker.from_env()
+        container = next((c for c in client.containers.list() if 'ueransim' in c.name.lower()), None)
+
+        if not container:
+            print("UERANSIM container not running.")
+            return
+
+        ue_config_dir = "./config/custom/ue"
+        ue_files = sorted(f for f in os.listdir(ue_config_dir) if f.startswith("uecfg") and f.endswith(".yaml"))
+
+        if not ue_files:
+            print("No UE config files found.")
+            return
+
+        for file in ue_files:
+            cmd = f"./nr-ue -c /ueransim/config/ue/{file}"
+            print(f"Executing in container: {cmd}")
+            exec_result = container.exec_run(cmd, detach=True, workdir="/ueransim")
+            print(f"Started UE with config {file}, Exec ID: {exec_result}")
+
+        print("All UEs launched.")
+    except docker.errors.DockerException as e:
+        print(f"Error executing UE commands in UERANSIM: {e}")
+
 
 def main():
     """Main function to parse arguments and generate configuration files"""
-    parser = argparse.ArgumentParser(description="Generate Free5GC UPF topology configuration")
-    parser.add_argument("--num_upfs", type=int, required=True, help="Total number of UPFs (including PSA-UPF)")
+    parser = argparse.ArgumentParser(description="Generate Free5GC configuration files")
+    
+    # UPF topology arguments
+    parser.add_argument("--num_upfs", type=int, help="Total number of UPFs (including PSA-UPF)")
     parser.add_argument("--edge_upfs", type=int, default=1, help="Number of edge UPFs with N3 interfaces")
+    
+    # UE configuration arguments
+    parser.add_argument("--ue", type=int, help="Number of UE config files to generate")
 
     args = parser.parse_args()
 
+    # Handle UPF topology generation if num_upfs is provided
+    if args.num_upfs is not None:
+        handle_topology_generation(args)
+
+    # Handle UE generation if ue is provided
+    if args.ue is not None:
+        handle_ue_generation(args)
+
+    # If no arguments provided, show help
+    if args.num_upfs is None and args.ue is None:
+        parser.print_help()
+
+def handle_topology_generation(args):
+    """Handle the topology generation"""
     # Validate arguments
     if args.num_upfs < 2:
         raise ValueError("Number of UPFs must be at least 2 (one PSA-UPF and at least one intermediate UPF)")
@@ -53,6 +154,7 @@ def main():
         raise ValueError("Number of edge UPFs must be at least 1 and less than total UPFs")
 
     # Set up config output directory
+    
     custom_config_dir = "./config/custom"
     os.makedirs(custom_config_dir, exist_ok=True)
 
@@ -108,9 +210,8 @@ def main():
         return
     print("All UPF containers are running")
 
-    # === NEW SECTION: Prompt for coordinates and apply distance-based shaping ===
+    # Prompt for coordinates and apply distance-based shaping
     print("\nNow, enter the geographic coordinates (x, y) for each UPF (in decimal degrees):")
-
     upf_coords = {}
     for i in range(1, args.num_upfs):
         name = f"i-upf{i}" if i > 1 else "i-upf"
@@ -127,5 +228,33 @@ def main():
     apply_distance(upf_coords)
     print("Bandwidth shaping complete.")
 
+def handle_ue_generation(args):
+    if args.ue <= 0:
+        print("Number of UEs must be greater than 0.")
+        exit(1)
+
+    generate_ue_configs(args.ue)
+
+    try:
+        client = docker.from_env()
+        ueransim_container = next(
+            (c for c in client.containers.list(all=True) if 'ueransim' in c.name.lower()), None)
+
+        if ueransim_container:
+            print(f"Redémarrage du conteneur {ueransim_container.name}...")
+            ueransim_container.restart()
+            print("UERANSIM redémarré avec succès.")
+            time.sleep(5)  # Give it time to fully restart
+            connect_ues()  # <-- Launch UEs inside the container
+        else:
+            print("Conteneur UERANSIM introuvable.")
+    except docker.errors.DockerException as e:
+        print(f"Erreur lors du redémarrage de UERANSIM : {e}")
+
+    print(f"Generated {args.ue} UE configuration files")
+
+
 if __name__ == "__main__":
+   
     main()
+
