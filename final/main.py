@@ -168,7 +168,7 @@ def handle_topology_generation(args):
             yaml.dump(upf_config, f, default_flow_style=False)
 
     # Generate PSA-UPF configuration
-    psa_config = generate_upf_config("psa-upf", is_psa=True)
+    psa_config = generate_upf_config("remote-surgery", is_psa=True)
     with open(os.path.join(custom_config_dir, "upfcfg-psa-upf.yaml"), "w") as f:
         yaml.dump(psa_config, f, default_flow_style=False)
 
@@ -205,10 +205,10 @@ def handle_topology_generation(args):
 
     # Wait for UPF containers to start
     print("\nWaiting for all UPF containers to start...")
-    if not check_upf_containers_running(args.num_upfs):
-        print("Timeout waiting for UPF containers to start")
-        return
-    print("All UPF containers are running")
+    #if not check_upf_containers_running(args.num_upfs):
+     #   print("Timeout waiting for UPF containers to start")
+      #  return
+    #print("All UPF containers are running")
 
     # Prompt for coordinates and apply distance-based shaping
     print("\nNow, enter the geographic coordinates (x, y) for each UPF (in decimal degrees):")
@@ -225,8 +225,8 @@ def handle_topology_generation(args):
     upf_coords["psa-upf"] = {"x": x, "y": y}
 
     print("\nApplying distance-based bandwidth limits using tc...")
-    apply_distance(upf_coords)
-    print("Bandwidth shaping complete.")
+    #apply_distance(upf_coords)
+    #print("Bandwidth shaping complete.")
 
 def handle_ue_generation(args):
     if args.ue <= 0:

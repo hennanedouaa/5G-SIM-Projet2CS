@@ -376,24 +376,24 @@ def generate_docker_compose(num_upfs, edge_upfs, is_server=False):
         ueransim_dependencies.append("free5gc-custom-server")
     
     services["ueransim"] = {
-    "container_name": "ueransim",
-    "image": "free5gc/ueransim:latest",
-    "command": "bash /ueransim/config/start-ue.sh",
-    "volumes": [
-        "./config/start-ue.sh:/ueransim/config/start-ue.sh",
-        "./config/gnbcfg.yaml:/ueransim/config/gnbcfg.yaml",
-        "./config/custom/ue:/ueransim/config/ue"
-    ],
-    "cap_add": ["NET_ADMIN"],
-    "devices": ["/dev/net/tun"],
-    "networks": {
-        "privnet": {
-            "aliases": ["gnb.free5gc.org"]
-        }
-    },
-    "depends_on": ueransim_dependencies
-}
-
+        "container_name": "ueransim",
+        "image": "ikramdh18/custom-ueransim-owamp:latest",
+        "command": "./nr-gnb -c ./config/gnbcfg.yaml",
+        "volumes": [
+            "./config/gnbcfg.yaml:/ueransim/config/gnbcfg.yaml",
+            "./config/uecfg-custom.yaml:/ueransim/config/uecfg.yaml",
+            "./owamp_data:/var/lib/owamp"
+        ],
+        "cap_add": ["NET_ADMIN"],
+        "devices": ["/dev/net/tun"],
+        "networks": {
+            "privnet": {
+                "aliases": ["gnb.free5gc.org"]
+            }
+        },
+        "depends_on": ueransim_dependencies
+    }
+    
     # Full docker-compose config
     compose = {
         "version": "3.8",

@@ -40,7 +40,7 @@ uacAcc:
 # Initial PDU sessions to be established
 sessions:
   - type: "IPv4"
-    apn: "private_server"
+    apn: "internet"
     slice:
       sst: 0x01
       sd: 0x010203
