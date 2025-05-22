@@ -97,6 +97,7 @@ def measure_traffic_metrics(client_container, server_container, packet_size, pac
 
     # Detect UE interfaces
     ue_interfaces = get_ue_interfaces(client_container)
+    ue_interfaces = [iface for iface in ue_interfaces if iface != "uesimtun0"]
     if not ue_interfaces:
         print("[ERROR] No UE interfaces found.")
         return
