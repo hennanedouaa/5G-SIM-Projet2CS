@@ -354,22 +354,24 @@ def generate_docker_compose(num_upfs):
         ueransim_depends.append(f"free5gc-upf-{i}")
     
     docker_compose["services"]["ueransim"] = {
-        "container_name": "ueransim",
-        "image": "free5gc/ueransim:latest",
-        "command": "./nr-gnb -c ./config/gnbcfg.yaml",
-        "volumes": [
-            "./config/gnbcfg.yaml:/ueransim/config/gnbcfg.yaml",
-            "./config/uecfg-multi.yaml:/ueransim/config/uecfg.yaml"
-        ],
-        "cap_add": ["NET_ADMIN"],
-        "devices": ["/dev/net/tun"],
-        "networks": {
-            "privnet": {
-                "aliases": ["gnb.free5gc.org"]
-            }
-        },
-        "depends_on": ueransim_depends
-    }
+    "container_name": "ueransim",
+    "image": "free5gc/ueransim:latest",
+    "command": "./start-ue.sh",
+    "volumes": [
+        "./config/start-ue.sh:/ueransim/start-ue.sh",
+        "./config/gnbcfg.yaml:/ueransim/config/gnbcfg.yaml",
+        "./config/ue:/ueransim/config/ue"
+    ],
+    "cap_add": ["NET_ADMIN"],
+    "devices": ["/dev/net/tun"],
+    "networks": {
+        "privnet": {
+            "aliases": ["gnb.free5gc.org"]
+        }
+    },
+    "depends_on": ueransim_depends
+}
+
     
     # Add n3iwue service
     docker_compose["services"]["n3iwue"] = {

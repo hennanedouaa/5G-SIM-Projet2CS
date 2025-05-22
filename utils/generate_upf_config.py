@@ -94,13 +94,11 @@ def generate_docker_compose(num_upfs, edge_upfs):
     # Generate PSA UPF service
     services["free5gc-psa-upf"] = {
         "container_name": "psa-upf",
-        "image": "ikramdh18/custom-upf-owamp:latest",
+        "image": "free5gc/upf:v4.0.1",
         "command": "bash -c \"./upf-iptables.sh && ./upf -c ./config/upfcfg.yaml\"",
         "volumes": [
             "./config/custom/upfcfg-psa-upf.yaml:/free5gc/config/upfcfg.yaml",
-            "./config/upf-iptables.sh:/free5gc/upf-iptables.sh",
-            "./owamp_data:/var/lib/owamp"
-
+            "./config/upf-iptables.sh:/free5gc/upf-iptables.sh"
         ],
         "cap_add": ["NET_ADMIN"],
         "networks": {
@@ -368,13 +366,11 @@ def generate_docker_compose(num_upfs, edge_upfs):
     
     services["ueransim"] = {
         "container_name": "ueransim",
-        "image": "ikramdh18/custom-ueransim-owamp:latest",
+        "image": "free5gc/ueransim:latest",
         "command": "./nr-gnb -c ./config/gnbcfg.yaml",
         "volumes": [
             "./config/gnbcfg.yaml:/ueransim/config/gnbcfg.yaml",
-            "./config/custom/ue:/ueransim/config/ue",
-            "./owamp_data:/var/lib/owamp"
-
+            "./config/uecfg-custom.yaml:/ueransim/config/uecfg.yaml"
         ],
         "cap_add": ["NET_ADMIN"],
         "devices": ["/dev/net/tun"],

@@ -18,7 +18,7 @@ def run_owping_from_interface(client_container, server_ip, iface, packet_size, p
         "-c", str(packet_count),
         "-i", str(interval),
         "-s", str(packet_size),
-        "-B", iface,
+        "-B", "uesimtun1",
         server_ip
     ]
 
